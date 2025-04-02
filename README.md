@@ -18,7 +18,7 @@ Universal Meeting Assistant is a Chrome extension that automatically joins and m
 1. **Download the Extension**:
    - Clone the repository:  
      ```sh
-     git clone https://github.com/Silver595/AutoMeetingJoiner
+     git clone <your-repo-link>
      ```
 2. **Load the Extension**:
    - Open Chrome and navigate to `chrome://extensions/`.
@@ -41,7 +41,15 @@ Universal Meeting Assistant is a Chrome extension that automatically joins and m
 - If meetings do not auto-join, ensure pop-up permissions are allowed in Chrome settings.
 
 ## License
-This project is open-source and available under the [MIT License](LICENSE).
+This project is open-source and available under the 
+
+### MIT License
+<details>
+  <summary style="cursor: pointer; font-weight: bold;">MIT License</summary>
+  <p>
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+  </p>
+</details>
 
 ---
 Enjoy automated, stress-free meeting management with Universal Meeting Assistant!
