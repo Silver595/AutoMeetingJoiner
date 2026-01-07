@@ -1,79 +1,137 @@
+// Robust auto-join implementation:
+// - Avoids invalid CSS selectors that throw
+// - Searches by text/attributes across buttons and [role="button"]
+// - Traverses open shadow roots
+// - Uses MutationObserver to react to dynamic UI
+
 function autoJoinMeeting() {
-    // Advanced button selection strategies
-    const joinSelectors = [
-      'button[data-tooltip="Join now"]',
-      'button[aria-label="Ask to join"]',
-      'button:contains("Join now")',
-      'button:contains("Ask to join")',
-      // XPath selectors for more flexible matching
-      'xpath://button[contains(translate(text(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "join")]',
-      'xpath://button[contains(translate(text(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "ask to join")]'
-    ];
+  const lastClick = { time: 0 };
 
-    // Function to click button with multiple approaches
-    function tryClickButton(selector) {
-      // Direct querySelector method
-      let button = document.querySelector(selector);
-
-      // If direct selector fails, try more complex methods
-      if (!button && selector.startsWith('xpath://')) {
-        const xpathResult = document.evaluate(
-          selector.replace('xpath://', ''),
-          document,
-          null,
-          XPathResult.FIRST_ORDERED_NODE_TYPE,
-          null
-        );
-        button = xpathResult.singleNodeValue;
-      }
-
-      // Fallback: text content matching
-      if (!button && selector.includes(':contains(')) {
-        const text = selector.match(/:contains\("(.+)"\)/)[1];
-        button = Array.from(document.querySelectorAll('button'))
-          .find(el => el.textContent.toLowerCase().includes(text.toLowerCase()));
-      }
-
-      // Click button if found
-      if (button) {
-        try {
-          // Simulate mouse events for better compatibility
-          const mouseEvent = new MouseEvent('click', {
-            view: window,
-            bubbles: true,
-            cancelable: true
-          });
-          button.dispatchEvent(mouseEvent);
-          console.log('Successfully clicked join button:', selector);
-          return true;
-        } catch (error) {
-          console.error('Error clicking button:', error);
-        }
-      }
+  function isVisible(el) {
+    if (!el) return false;
+    try {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    } catch (e) {
       return false;
     }
+  }
 
-    // Try all join button selectors
-    for (const selector of joinSelectors) {
-      if (tryClickButton(selector)) {
-        break;
+  function textFor(el) {
+    return (
+      el.getAttribute && (
+        el.getAttribute('aria-label') || el.getAttribute('data-tooltip') || el.getAttribute('title')
+      )
+    ) || el.innerText || el.textContent || '';
+  }
+
+  function matchesJoinText(s) {
+    if (!s) return false;
+    const t = s.toLowerCase();
+    return /\b(join now|ask to join|ask to join|join meeting|join)\b/.test(t);
+  }
+
+  function dispatchClick(el) {
+    if (!el) return false;
+    // Prevent rapid multiple clicks
+    const now = Date.now();
+    if (now - lastClick.time < 3000) return false;
+
+    try {
+      // Try native click first
+      if (typeof el.click === 'function') {
+        el.click();
+      } else {
+        const ev = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
+        el.dispatchEvent(ev);
+      }
+      lastClick.time = now;
+      console.log('Auto-joined by clicking element:', el, 'text:', textFor(el));
+      return true;
+    } catch (err) {
+      console.warn('Click dispatch failed, trying mouse events:', err);
+      try {
+        const evDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
+        const evUp = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
+        el.dispatchEvent(evDown);
+        el.dispatchEvent(evUp);
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        lastClick.time = now;
+        return true;
+      } catch (e) {
+        console.error('All click attempts failed:', e);
+        return false;
+      }
+    }
+  }
+
+  // Traverse a root (document or shadow root) to find candidate buttons
+  function findJoinInRoot(root) {
+    const nodeList = Array.from(root.querySelectorAll('button, [role="button"], a, input[type="button"]'));
+
+    for (const el of nodeList) {
+      const s = textFor(el);
+      if (matchesJoinText(s) && isVisible(el)) {
+        return el;
       }
     }
 
-    // Dismiss common popups and overlays
-    const dismissSelectors = [
-      'button[aria-label="Close"]',
-      'button[data-tooltip="Close"]',
-      'button:contains("Close")',
-      'xpath://button[contains(translate(text(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "close")]'
-    ];
+    // Check for elements that may act like buttons but are not standard
+    const all = Array.from(root.querySelectorAll('*'));
+    for (const el of all) {
+      const s = textFor(el);
+      if (matchesJoinText(s) && isVisible(el)) return el;
+    }
 
-    dismissSelectors.forEach(selector => {
-      const dismissButton = document.querySelector(selector);
-      if (dismissButton) dismissButton.click();
-    });
+    // Recurse into open shadow roots
+    const elementsWithShadow = Array.from(root.querySelectorAll('*')).filter(e => e.shadowRoot);
+    for (const host of elementsWithShadow) {
+      const found = findJoinInRoot(host.shadowRoot);
+      if (found) return found;
+    }
+
+    return null;
   }
 
-  // Run auto-join on page load, immediately and then periodically
+  // Primary search on document
+  const candidate = findJoinInRoot(document);
+  if (candidate) {
+    return dispatchClick(candidate);
+  }
+
+  return false;
+}
+
+// Run immediately and then observe for changes
+try {
   autoJoinMeeting();
-  setInterval(autoJoinMeeting, 5000);  // Reduced interval for quicker response
+} catch (e) {
+  console.error('Auto join initial run failed:', e);
+}
+
+// MutationObserver to catch dynamic UI updates
+(function observeDOM() {
+  const observer = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (m.addedNodes && m.addedNodes.length) {
+        try {
+          if (autoJoinMeeting()) {
+            // Optional: if join succeeded, we can disconnect observer temporarily
+            // observer.disconnect();
+            break;
+          }
+        } catch (e) {
+          console.error('Error during mutation check:', e);
+        }
+      }
+    }
+  });
+
+  const body = document.body || document.documentElement;
+  if (body) observer.observe(body, { childList: true, subtree: true });
+
+  // Fallback polling in case mutation events are not sufficient
+  setInterval(() => {
+    try { autoJoinMeeting(); } catch (e) { /* ignore */ }
+  }, 2000);
+})();
